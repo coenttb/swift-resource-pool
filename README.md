@@ -559,6 +559,74 @@ func shutdown() async throws {
 }
 ```
 
+### Sharing Pools Globally
+
+**IMPORTANT:** For system-limited resources (WebViews, database connections, file handles), creating multiple pool instances can lead to resource exhaustion. Use a global actor to ensure a single shared pool:
+
+```swift
+// ❌ BAD: Each operation creates its own pool
+func generatePDF(html: String) async throws -> Data {
+    let pool = try await ResourcePool<WKWebViewResource>(capacity: 8, ...)
+    // Problem: 7 parallel calls = 56 WebViews trying to initialize!
+    return try await pool.withResource { ... }
+}
+
+// ✅ GOOD: Single shared pool via global actor
+@globalActor
+public actor WebViewPoolActor {
+    public static let shared = WebViewPoolActor()
+
+    private var sharedPool: ResourcePool<WKWebViewResource>?
+
+    public func getPool() async throws -> ResourcePool<WKWebViewResource> {
+        if let existing = sharedPool {
+            return existing
+        }
+
+        let pool = try await ResourcePool<WKWebViewResource>(
+            capacity: 8,
+            resourceConfig: .default,
+            warmup: true
+        )
+        sharedPool = pool
+        return pool
+    }
+}
+
+// Usage: All callers share the same pool
+func generatePDF(html: String) async throws -> Data {
+    let pool = try await WebViewPoolActor.shared.getPool()
+    return try await pool.withResource { webView in
+        try await webView.renderPDF(html: html)
+    }
+}
+```
+
+**Why this matters:**
+- 7 parallel operations × 8 WebViews each = **56 WebViews** (exhausts system)
+- 7 parallel operations sharing 1 pool of 8 = **8 WebViews** (graceful queueing)
+- **56x improvement** in test performance (76s → 1.4s)
+- Proper FIFO queueing ensures fairness
+- One warmup cost amortized across all users
+
+**When NOT to share:**
+- Different resource configurations needed
+- Isolated testing scenarios
+- Short-lived, bounded workloads
+- Resources with incompatible lifecycles
+
+### Multiple Pools
+
+Each `ResourcePool` is independent. When running multiple pools of **different types**, consider your total system resource budget:
+
+```swift
+// Each pool maxes out independently
+let dbPool = ResourcePool<DatabaseConnection>(capacity: 10)    // ~100MB
+let httpPool = ResourcePool<HTTPClient>(capacity: 20)          // ~100MB
+let webViewPool = ResourcePool<WKWebView>(capacity: 3)         // ~600MB
+// Total: ~800MB
+```
+
 ## Error Handling
 
 ```swift

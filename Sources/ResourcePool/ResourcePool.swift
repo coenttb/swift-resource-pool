@@ -62,7 +62,7 @@ private struct Waiter<Resource: PoolableResource>: Sendable {
 ///
 /// # Features
 /// - Lazy resource creation up to configured capacity
-/// - Optional warmup to pre-create resources
+/// - Optional background warmup to pre-create resources (non-blocking)
 /// - Automatic validation and reset on return
 /// - Timeout support for acquisition
 /// - Fair FIFO ordering prevents starvation
@@ -77,19 +77,67 @@ private struct Waiter<Resource: PoolableResource>: Sendable {
 /// - Failed resources are discarded and lazily recreated
 /// - Scales efficiently to 200+ concurrent waiters
 ///
-/// # Example
+/// # Basic Usage
 /// ```swift
-/// let pool = try await ResourcePool<WKWebView>(
+/// let pool = try await ResourcePool<MyResource>(
 ///     capacity: 10,
-///     resourceConfig: .init(),
+///     resourceConfig: .default,
 ///     warmup: true
 /// )
 ///
-/// let pdfData = try await pool.withResource(timeout: .seconds(10)) { webView in
-///     try await webView.renderPDF(html: htmlContent)
+/// let result = try await pool.withResource(timeout: .seconds(10)) { resource in
+///     try await resource.performWork()
 /// }
 /// // Resource automatically returned, even if cancelled
 /// ```
+///
+/// # Sharing Pools Across Your Application
+///
+/// **IMPORTANT:** For system-limited resources (WebViews, database connections, file handles),
+/// creating multiple pool instances can lead to resource exhaustion. Instead, use a single
+/// shared pool via a global actor:
+///
+/// ```swift
+/// // Define a global actor to hold your shared pool
+/// @globalActor
+/// public actor MyResourcePoolActor {
+///     public static let shared = MyResourcePoolActor()
+///
+///     private var sharedPool: ResourcePool<MyResource>?
+///
+///     public func getPool() async throws -> ResourcePool<MyResource> {
+///         if let existing = sharedPool {
+///             return existing
+///         }
+///
+///         let pool = try await ResourcePool<MyResource>(
+///             capacity: 10,
+///             resourceConfig: .default,
+///             warmup: true
+///         )
+///         sharedPool = pool
+///         return pool
+///     }
+/// }
+///
+/// // Usage: All callers share the same pool
+/// let pool = try await MyResourcePoolActor.shared.getPool()
+/// try await pool.withResource { resource in
+///     // Work with resource
+/// }
+/// ```
+///
+/// **Why share pools?**
+/// - Prevents resource exhaustion (e.g., 7 parallel operations × 8 WebViews each = 56 WebViews)
+/// - One warmup cost amortized across all users
+/// - Better resource utilization through shared queuing
+/// - System limits respected (macOS limits concurrent WebKit processes, DB connections, etc.)
+///
+/// **When NOT to share:**
+/// - Different resource configurations needed
+/// - Isolated testing scenarios
+/// - Short-lived, bounded workloads
+/// - Resources with incompatible lifecycles
 public actor ResourcePool<Resource: PoolableResource> {
     // MARK: - State
     
@@ -126,34 +174,25 @@ public actor ResourcePool<Resource: PoolableResource> {
     /// - Parameters:
     ///   - capacity: Maximum number of resources to create (must be > 0)
     ///   - resourceConfig: Configuration for creating resources
-    ///   - warmup: If true, pre-create all resources; if false, create lazily on demand
+    ///   - warmup: If true, pre-create resources in background; if false, create lazily on demand
     public init(
         capacity: Int,
         resourceConfig: Resource.Config,
         warmup: Bool = true
     ) async throws {
         precondition(capacity > 0, "Capacity must be positive")
-        
+
         self.capacity = capacity
         self.factory = ResourceFactory(config: resourceConfig)
-        
-        // Pre-create resources if warmup enabled
-        if warmup {
-            for _ in 0..<capacity {
-                do {
-                    let resource = try await factory.create()
-                    available.append(resource)
-                    totalCreated += 1
-                } catch {
-                    _metrics.recordCreationFailure()
-                    throw PoolError.creationFailed("Warmup failed: \(error)")
-                }
-            }
-        }
-        
+
         // Start background cleanup task for expired waiters
         startCleanupTask()
-        
+
+        // Start background warmup if enabled (non-blocking)
+        if warmup {
+            startBackgroundWarmup()
+        }
+
         verifyAccounting()
     }
     
@@ -498,6 +537,58 @@ public actor ResourcePool<Resource: PoolableResource> {
                 await self?.cleanExpiredWaiters()
             }
         }
+    }
+
+    /// Start background warmup to pre-create resources without blocking initialization
+    ///
+    /// This creates resources in the background, allowing the pool to be immediately
+    /// available. The first request may need to create its resource lazily, but
+    /// subsequent requests will benefit from pre-warmed resources.
+    private func startBackgroundWarmup() {
+        let targetCapacity = capacity
+
+        Task { [weak self] in
+            guard let self = self else { return }
+
+            // Pre-create resources up to capacity
+            for _ in 0..<targetCapacity {
+                // Check if pool was closed or we've reached capacity
+                let isClosed = await self.isClosed
+                let totalCreated = await self.totalCreated
+
+                guard !isClosed, totalCreated < targetCapacity else {
+                    break
+                }
+
+                do {
+                    let resource = try await self.factory.create()
+
+                    // Add to pool if still needed
+                    await self.addWarmupResource(resource)
+                } catch {
+                    await self.recordCreationFailure()
+                    // Continue warmup despite failures - some resources may succeed
+                }
+            }
+        }
+    }
+
+    /// Add a warmed-up resource to the pool
+    private func addWarmupResource(_ resource: Resource) {
+        guard !isClosed, totalCreated < capacity else {
+            // Pool closed or capacity reached during warmup - discard
+            return
+        }
+
+        totalCreated += 1
+
+        // Hand off to waiter if any, otherwise add to available
+        handOffOrReturnResource(resource)
+    }
+
+    /// Record a creation failure in metrics
+    private func recordCreationFailure() {
+        _metrics.recordCreationFailure()
     }
     
     /// Remove expired waiters and resume with timeout error
