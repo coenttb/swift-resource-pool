@@ -431,15 +431,25 @@ public actor ResourcePool<Resource: PoolableResource> {
     /// This is the core of the thundering herd fix! Instead of broadcasting
     /// to ALL waiters, we directly resume EXACTLY ONE continuation.
     private func handOffOrReturnResource(_ resource: Resource) {
-        // Remove expired waiters first
-        waitQueue.removeAll { $0.isExpired }
-        
+        // Remove expired waiters with batching limit to prevent CPU spikes
+        // Under high contention with many timeouts, limit removals per call
+        let maxRemovalsPerCall = 10
+        var removedCount = 0
+        waitQueue.removeAll { waiter in
+            guard removedCount < maxRemovalsPerCall else { return false }
+            if waiter.isExpired {
+                removedCount += 1
+                return true
+            }
+            return false
+        }
+
         // If there's a waiter, hand off directly (FIFO for fairness)
         if let waiter = waitQueue.first {
             waitQueue.removeFirst()
             leased.insert(ObjectIdentifier(resource))
             _metrics.recordDirectHandoff()
-            
+
             // Resume the continuation with the resource
             // This wakes EXACTLY ONE task - no thundering herd!
             waiter.continuation.resume(returning: resource)
@@ -664,8 +674,11 @@ public struct Metrics: Sendable {
 
 extension Duration {
     fileprivate static func / (lhs: Duration, rhs: Int) -> Duration {
-        let nanoseconds = lhs.components.seconds * 1_000_000_000 + lhs.components.attoseconds / 1_000_000_000
-        let avgNanoseconds = nanoseconds / Int64(rhs)
+        // Convert to nanoseconds with better precision
+        // attoseconds = 10^-18 seconds, so attoseconds / 10^9 = nanoseconds
+        let totalNanoseconds = (lhs.components.seconds * 1_000_000_000) +
+                               (lhs.components.attoseconds / 1_000_000_000)
+        let avgNanoseconds = totalNanoseconds / Int64(rhs)
         return .nanoseconds(avgNanoseconds)
     }
 }
