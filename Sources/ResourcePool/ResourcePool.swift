@@ -46,9 +46,24 @@ private struct Waiter<Resource: PoolableResource>: Sendable {
     let id: UUID
     let continuation: CheckedContinuation<Resource, Error>
     let deadline: ContinuousClock.Instant
-    
+
     var isExpired: Bool {
         ContinuousClock.now >= deadline
+    }
+}
+
+// MARK: - Resource Metadata
+
+/// Tracks usage statistics for resource cycling
+private struct ResourceMetadata: Sendable {
+    var usageCount: Int
+
+    init() {
+        self.usageCount = 0
+    }
+
+    mutating func incrementUsage() {
+        usageCount += 1
     }
 }
 
@@ -140,33 +155,39 @@ private struct Waiter<Resource: PoolableResource>: Sendable {
 /// - Resources with incompatible lifecycles
 public actor ResourcePool<Resource: PoolableResource> {
     // MARK: - State
-    
+
     /// Available resources waiting to be acquired (LIFO for cache locality)
     private var available: [Resource] = []
-    
+
     /// ObjectIdentifiers of resources currently leased
     private var leased: Set<ObjectIdentifier> = []
-    
+
     /// FIFO queue of tasks waiting for resources (eliminates thundering herd)
     private var waitQueue: [Waiter<Resource>] = []
-    
+
     /// Maximum resources to create
     private let capacity: Int
-    
+
     /// Factory for creating resources
     private let factory: ResourceFactory<Resource>
-    
+
     /// Total resources created (to enforce capacity)
     private var totalCreated: Int = 0
-    
+
     /// Whether pool is closed
     private var isClosed = false
-    
+
     /// Metrics for observability
     private var _metrics = Metrics()
-    
+
     /// Task to periodically clean expired waiters
     private var cleanupTask: Task<Void, Never>?
+
+    /// Resource usage tracking for cycling
+    private var resourceMetadata: [ObjectIdentifier: ResourceMetadata] = [:]
+
+    /// Maximum uses before cycling a resource (nil = no cycling)
+    private let maxUsesBeforeCycling: Int?
     
     // MARK: - Initialization
     
@@ -175,15 +196,18 @@ public actor ResourcePool<Resource: PoolableResource> {
     ///   - capacity: Maximum number of resources to create (must be > 0)
     ///   - resourceConfig: Configuration for creating resources
     ///   - warmup: If true, pre-create resources in background; if false, create lazily on demand
+    ///   - maxUsesBeforeCycling: Maximum times a resource can be used before being recycled (nil = no limit)
     public init(
         capacity: Int,
         resourceConfig: Resource.Config,
-        warmup: Bool = true
+        warmup: Bool = true,
+        maxUsesBeforeCycling: Int? = nil
     ) async throws {
         precondition(capacity > 0, "Capacity must be positive")
 
         self.capacity = capacity
         self.factory = ResourceFactory(config: resourceConfig)
+        self.maxUsesBeforeCycling = maxUsesBeforeCycling
 
         // Start background cleanup task for expired waiters
         startCleanupTask()
@@ -339,16 +363,21 @@ public actor ResourcePool<Resource: PoolableResource> {
         
         // FAST PATH: Resource immediately available
         if let resource = available.popLast() {
-            leased.insert(ObjectIdentifier(resource))
+            let id = ObjectIdentifier(resource)
+            leased.insert(id)
+            recordResourceAcquisition(id: id)
             return resource
         }
-        
+
         // LAZY CREATION: Create if under capacity
         if totalCreated < capacity {
             do {
                 let resource = try await factory.create()
                 totalCreated += 1
-                leased.insert(ObjectIdentifier(resource))
+                let id = ObjectIdentifier(resource)
+                leased.insert(id)
+                resourceMetadata[id] = ResourceMetadata()
+                recordResourceAcquisition(id: id)
                 return resource
             } catch {
                 _metrics.recordCreationFailure()
@@ -419,11 +448,25 @@ public actor ResourcePool<Resource: PoolableResource> {
             return
         }
         
+        // Check if resource should be cycled
+        if let maxUses = maxUsesBeforeCycling,
+           let metadata = resourceMetadata[id],
+           metadata.usageCount >= maxUses {
+            // Resource exceeded max uses - discard and replace
+            totalCreated -= 1
+            resourceMetadata.removeValue(forKey: id)
+            _metrics.recordResourceCycled()
+            // Try to serve next waiter with a new resource
+            await tryServeNextWaiter()
+            return
+        }
+
         // Validate resource
         let isValid = await resource.validate()
         guard isValid else {
             // Resource is invalid - discard it
             totalCreated -= 1
+            resourceMetadata.removeValue(forKey: id)
             _metrics.recordValidationFailure()
             // Try to serve next waiter with a new resource
             await tryServeNextWaiter()
@@ -594,7 +637,7 @@ public actor ResourcePool<Resource: PoolableResource> {
     /// Remove expired waiters and resume with timeout error
     private func cleanExpiredWaiters() {
         var expiredWaiters: [Waiter<Resource>] = []
-        
+
         waitQueue.removeAll { waiter in
             if waiter.isExpired {
                 expiredWaiters.append(waiter)
@@ -602,11 +645,16 @@ public actor ResourcePool<Resource: PoolableResource> {
             }
             return false
         }
-        
+
         for waiter in expiredWaiters {
             _metrics.recordTimeout()
             waiter.continuation.resume(throwing: PoolError.timeout)
         }
+    }
+
+    /// Record resource acquisition and increment usage count
+    private func recordResourceAcquisition(id: ObjectIdentifier) {
+        resourceMetadata[id, default: ResourceMetadata()].incrementUsage()
     }
     
     // MARK: - Debug Support
@@ -706,7 +754,10 @@ public struct Metrics: Sendable {
     
     /// Total number of resources handed directly to waiters (vs returned to pool)
     public private(set) var directHandoffs: Int = 0
-    
+
+    /// Total number of resources cycled due to max usage
+    public private(set) var resourcesCycled: Int = 0
+
     /// Total wait time across all acquisitions
     private var totalWaitTime: Duration = .zero
     
@@ -758,6 +809,10 @@ public struct Metrics: Sendable {
     
     mutating func recordDirectHandoff() {
         directHandoffs += 1
+    }
+
+    mutating func recordResourceCycled() {
+        resourcesCycled += 1
     }
 }
 
