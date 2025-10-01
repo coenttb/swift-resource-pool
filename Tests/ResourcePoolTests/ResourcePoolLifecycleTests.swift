@@ -145,7 +145,7 @@ struct ResourcePoolLifecycleTests {
             for _ in 0..<5 {
                 group.addTask {
                     do {
-                        try await pool.withResource(timeout: .seconds(5)) { _ in
+                        _ = try await pool.withResource(timeout: .seconds(5)) { _ in
                             Issue.record("Should not succeed")
                         }
                     } catch PoolError.closed {

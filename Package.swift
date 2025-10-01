@@ -16,27 +16,13 @@ let package = Package(
             targets: ["ResourcePool"]
         ),
     ],
-    dependencies: [
-        .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.0.0"),
-        .package(url: "https://github.com/coenttb/swift-environment-variables", from: "0.1.0"),
-        .package(url: "https://github.com/apple/swift-collections", from: "1.1.0"),
-    ],
     targets: [
         .target(
-            name: "ResourcePool",
-            dependencies: [
-                .product(name: "Dependencies", package: "swift-dependencies"),
-                .product(name: "DependenciesMacros", package: "swift-dependencies"),
-                .product(name: "EnvironmentVariables", package: "swift-environment-variables"),
-                .product(name: "Collections", package: "swift-collections"),
-            ]
+            name: "ResourcePool"
         ),
         .testTarget(
             name: "ResourcePoolTests",
-            dependencies: [
-                "ResourcePool",
-                .product(name: "DependenciesTestSupport", package: "swift-dependencies"),
-            ]
+            dependencies: ["ResourcePool"]
         ),
     ],
     swiftLanguageVersions: [.v5]

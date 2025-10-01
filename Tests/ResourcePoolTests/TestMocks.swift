@@ -163,13 +163,3 @@ extension Duration {
         }
     }
 }
-
-extension Duration: Comparable {
-    public static func < (lhs: Duration, rhs: Duration) -> Bool {
-        let lhsNanos = lhs.components.seconds * 1_000_000_000 +
-                      lhs.components.attoseconds / 1_000_000_000
-        let rhsNanos = rhs.components.seconds * 1_000_000_000 +
-                      rhs.components.attoseconds / 1_000_000_000
-        return lhsNanos < rhsNanos
-    }
-}
