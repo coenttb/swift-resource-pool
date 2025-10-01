@@ -334,7 +334,7 @@ public actor ResourcePool<Resource: PoolableResource> {
                 // Schedule timeout check
                 Task {
                     try? await Task.sleep(for: timeout)
-                    await handleTimeout(waiterId: waiterId)
+                    handleTimeout(waiterId: waiterId)
                 }
             }
         } onCancel: {
