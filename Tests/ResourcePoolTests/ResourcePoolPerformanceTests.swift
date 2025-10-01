@@ -306,14 +306,22 @@ struct ResourcePoolPerformanceTests {
                         result.handoffRate * 100))
         }
         
-        if results.count >= 3 {
-            let small = results[1].opsPerSecond
-            let large = results[3].opsPerSecond
-            
-            let degradation = (small - large) / small
-            print("\nThroughput degradation (30 -> 100 waiters): \(String(format: "%.1f%%", degradation * 100))")
-            
-            #expect(degradation < 0.5)
+        if results.count >= 4 {
+            let baseline = results[1].opsPerSecond  // 30 waiters
+            let scaled = results[3].opsPerSecond    // 100 waiters
+
+            // Calculate scaling efficiency (should be positive = improvement)
+            let scalingFactor = scaled / baseline
+            let improvement = ((scaled - baseline) / baseline) * 100
+
+            print("\nScalability (30 -> 100 waiters):")
+            print("  Baseline (30): \(String(format: "%.1f", baseline)) ops/sec")
+            print("  Scaled (100): \(String(format: "%.1f", scaled)) ops/sec")
+            print("  Scaling factor: \(String(format: "%.2fx", scalingFactor))")
+            print("  Improvement: \(String(format: "%.1f%%", improvement))")
+
+            // Expect near-linear scaling (3.3x more waiters should give ~3x throughput)
+            #expect(scalingFactor > 2.5, "Should scale efficiently with more waiters")
         }
     }
 

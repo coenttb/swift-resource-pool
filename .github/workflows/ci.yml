@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Swift 5.9 testing
+  swift-5_9:
+    name: Swift 5.9 / macOS
+    runs-on: macos-14
+    strategy:
+      matrix:
+        config: ['debug', 'release']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode (Swift 5.9)
+        run: sudo xcode-select -s /Applications/Xcode_15.2.app
+
+      - name: Print Swift version
+        run: swift --version
+
+      - name: Build with Package.swift
+        run: swift build -c ${{ matrix.config }}
+
+      - name: Run tests
+        run: swift test -c ${{ matrix.config }}
+
+  # Swift 6.0 testing
+  swift-6_0:
+    name: Swift 6.0 / macOS
+    runs-on: macos-15
+    strategy:
+      matrix:
+        config: ['debug', 'release']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode (Swift 6.0)
+        run: sudo xcode-select -s /Applications/Xcode_16.0.app
+
+      - name: Print Swift version
+        run: swift --version
+
+      - name: Build with Package@swift-6.0.swift
+        run: swift build -c ${{ matrix.config }}
+
+      - name: Run tests
+        run: swift test -c ${{ matrix.config }}
+
+  # Linux testing (Swift 6.0)
+  linux:
+    name: Swift 6.0 / Ubuntu
+    runs-on: ubuntu-latest
+    container: swift:6.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: swift build
+
+      - name: Run tests
+        run: swift test
+
+  # All platforms must pass
+  ci-success:
+    name: CI Success
+    needs: [swift-5_9, swift-6_0, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "✅ All CI checks passed!"
