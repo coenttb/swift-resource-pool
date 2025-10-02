@@ -212,9 +212,25 @@ public actor ResourcePool<Resource: PoolableResource> {
         // Start background cleanup task for expired waiters
         startCleanupTask()
 
-        // Start background warmup if enabled (non-blocking)
+        // Warmup strategy:
+        // - Create first resource synchronously for immediate availability (eliminates cold start)
+        // - Create remaining resources in background (non-blocking)
         if warmup {
-            startBackgroundWarmup()
+            do {
+                // Create first resource synchronously - critical for cold start performance
+                let firstResource = try await factory.create()
+                totalCreated += 1
+                available.append(firstResource)
+
+                // Continue warmup for remaining resources in background
+                if capacity > 1 {
+                    startBackgroundWarmup(skipCount: 1)
+                }
+            } catch {
+                _metrics.recordCreationFailure()
+                // If first resource fails, fall back to full background warmup
+                startBackgroundWarmup(skipCount: 0)
+            }
         }
 
         verifyAccounting()
@@ -584,17 +600,18 @@ public actor ResourcePool<Resource: PoolableResource> {
 
     /// Start background warmup to pre-create resources without blocking initialization
     ///
-    /// This creates resources in the background, allowing the pool to be immediately
-    /// available. The first request may need to create its resource lazily, but
-    /// subsequent requests will benefit from pre-warmed resources.
-    private func startBackgroundWarmup() {
+    /// This creates resources in the background. With skipCount > 0, it skips creating
+    /// the first N resources (useful when some resources were created synchronously).
+    ///
+    /// - Parameter skipCount: Number of resources to skip (already created)
+    private func startBackgroundWarmup(skipCount: Int = 0) {
         let targetCapacity = capacity
 
         Task { [weak self] in
             guard let self = self else { return }
 
-            // Pre-create resources up to capacity
-            for _ in 0..<targetCapacity {
+            // Pre-create remaining resources up to capacity
+            for _ in skipCount..<targetCapacity {
                 // Check if pool was closed or we've reached capacity
                 let isClosed = await self.isClosed
                 let totalCreated = await self.totalCreated
