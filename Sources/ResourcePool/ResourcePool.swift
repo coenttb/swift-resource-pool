@@ -177,6 +177,9 @@ public actor ResourcePool<Resource: PoolableResource> {
     /// Whether pool is closed
     private var isClosed = false
 
+    /// Whether pool is draining (rejecting new acquisitions but accepting returns)
+    private var isDraining = false
+
     /// Metrics for observability
     private var _metrics = Metrics()
 
@@ -313,35 +316,43 @@ public actor ResourcePool<Resource: PoolableResource> {
         }
     }
     
-    /// Drain the pool gracefully and close it
+    /// Drain the pool gracefully
     ///
     /// This method:
-    /// 1. Stops accepting new acquisitions (sets `isClosed`)
+    /// 1. Stops accepting new acquisitions (sets `isDraining`)
     /// 2. Resumes all waiting tasks with `PoolError.closed`
     /// 3. Waits for all leased resources to be returned (up to timeout)
-    /// 4. Closes the pool and clears all state
     ///
-    /// Use this for graceful shutdown to ensure all resources are properly returned.
+    /// After draining, the pool stops accepting new acquisitions but continues to
+    /// accept resource returns from in-flight operations. The pool can then be safely
+    /// deallocated via ARC, or you can call `close()` to explicitly clear all state.
+    ///
+    /// Use cases:
+    /// - Pool replacement: `drain()` then let ARC deallocate
+    /// - Graceful shutdown: `drain()` then `close()` to clear state
     ///
     /// - Parameter timeout: Maximum time to wait for resources to be returned
     /// - Throws: `PoolError.drainTimeout` if timeout expires with resources still leased
     public func drain(timeout: Duration = .seconds(30)) async throws {
-        isClosed = true
-        
+        isDraining = true
+
         // Resume all waiters with closed error
         resumeAllWaitersWithError(PoolError.closed)
-        
+
         // Wait for leased resources to return
         let deadline = ContinuousClock.now + timeout
         while !leased.isEmpty && ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(50))
         }
-        
+
         if !leased.isEmpty {
             throw PoolError.drainTimeout
         }
-        
-        await close()
+
+        // Note: We don't call close() here.
+        // Pool is draining (isDraining = true) so no new acquisitions,
+        // but resources can still be returned.
+        // Caller can call close() explicitly if needed, or just let ARC deallocate.
     }
     
     /// Close the pool immediately
@@ -373,7 +384,7 @@ public actor ResourcePool<Resource: PoolableResource> {
     
     /// Acquire a resource with fair FIFO semantics and cancellation support
     private func acquireResource(timeout: Duration) async throws -> Resource {
-        if isClosed {
+        if isClosed || isDraining {
             throw PoolError.closed
         }
         
@@ -457,8 +468,9 @@ public actor ResourcePool<Resource: PoolableResource> {
         guard leased.remove(id) != nil else {
             return
         }
-        
-        // If pool is closed, don't process the return - just discard
+
+        // If pool is fully closed (not just draining), don't process the return - just discard
+        // When draining, we still accept returns from in-flight operations
         guard !isClosed else {
             totalCreated -= 1
             return
