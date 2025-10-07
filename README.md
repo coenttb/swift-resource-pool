@@ -345,7 +345,7 @@ actor WebViewResource: PoolableResource {
     func reset() async throws {
         await MainActor.run {
             webView.stopLoading()
-            webView.loadhtmltring("", baseURL: nil)
+            webView.loadHTMLString("", baseURL: nil)
         }
     }
     

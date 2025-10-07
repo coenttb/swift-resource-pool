@@ -185,18 +185,21 @@ struct ResourcePoolConcurrencyTests {
             ),
             warmup: true
         )
-        
+
+        // Wait for background warmup to complete
+        try await pool.waitForWarmupCompletion()
+
         actor AcquisitionTracker {
             var completedTasks: Set<Int> = []
-            
+
             func recordCompletion(taskId: Int) {
                 completedTasks.insert(taskId)
             }
-            
+
             var count: Int { completedTasks.count }
         }
         let tracker = AcquisitionTracker()
-        
+
         try await withThrowingTaskGroup(of: Void.self) { group in
             for taskId in 1...20 {
                 group.addTask {
@@ -206,31 +209,31 @@ struct ResourcePoolConcurrencyTests {
                     }
                 }
             }
-            
+
             try await group.waitForAll()
         }
-        
+
         let completedCount = await tracker.count
         let metrics = await pool.metrics
-        
+
         print("\n=== No Thundering Herd Verification ===")
         print("Tasks completed: \(completedCount)/20")
         print("Direct handoffs: \(metrics.directHandoffs)")
         print("Handoff rate: \(String(format: "%.1f%%", metrics.handoffRate * 100))")
         print("Timeouts: \(metrics.timeouts)")
-        
+
         // Key validations for no thundering herd:
-        
+
         // 1. All tasks completed successfully (no deadlocks or excessive timeouts)
         #expect(completedCount == 20, "All 20 tasks should complete")
-        
+
         // 2. High direct handoff rate indicates resources go directly to waiters
         //    With 20 tasks and 2 resources, expect ~18 handoffs (first 2 get from pool)
         #expect(metrics.directHandoffs >= 15, "Most resources should be handed off directly to waiting tasks")
-        
+
         // 3. No timeouts from thundering herd contention
         #expect(metrics.timeouts == 0, "No timeouts should occur with efficient queue")
-        
+
         // 4. Verify queue was actually used (waiters were queued)
         #expect(metrics.waitersQueued >= 10, "Many tasks should have waited in queue")
     }
@@ -328,24 +331,32 @@ struct ResourcePoolConcurrencyTests {
             resourceConfig: .init(),
             warmup: true
         )
-        
+
+        // Wait for background warmup to complete
+        try await pool.waitForWarmupCompletion()
+
         actor StatsValidator {
             var inconsistencies: [String] = []
-            
+
             func validate(_ stats: Statistics) {
-                let total = stats.available + stats.leased
-                if total > stats.capacity {
-                    inconsistencies.append("Total (\(total)) > capacity (\(stats.capacity))")
+                // totalCreated should never exceed capacity
+                if stats.totalCreated > stats.capacity {
+                    inconsistencies.append("totalCreated (\(stats.totalCreated)) > capacity (\(stats.capacity))")
+                }
+                // available + leased should be ≤ totalCreated (can be < during lazy creation)
+                let accountedFor = stats.available + stats.leased
+                if accountedFor > stats.totalCreated {
+                    inconsistencies.append("available+leased (\(accountedFor)) > totalCreated (\(stats.totalCreated))")
                 }
                 if stats.available < 0 || stats.leased < 0 {
                     inconsistencies.append("Negative values: available=\(stats.available), leased=\(stats.leased)")
                 }
             }
-            
+
             var isValid: Bool { inconsistencies.isEmpty }
         }
         let validator = StatsValidator()
-        
+
         await withTaskGroup(of: Void.self) { group in
             // Hammer the pool
             for _ in 0..<20 {
@@ -359,7 +370,7 @@ struct ResourcePoolConcurrencyTests {
                     }
                 }
             }
-            
+
             // Continuously read statistics
             group.addTask {
                 for _ in 0..<100 {
@@ -368,10 +379,10 @@ struct ResourcePoolConcurrencyTests {
                     try? await Task.sleep(for: .milliseconds(5))
                 }
             }
-            
+
             await group.waitForAll()
         }
-        
+
         let isValid = await validator.isValid
         #expect(isValid)
     }

@@ -13,6 +13,9 @@ struct ResourcePoolBasicTests {
             warmup: true
         )
 
+        // Wait for background warmup to complete
+        try await pool.waitForWarmupCompletion()
+
         let initialStats = await pool.statistics
         #expect(initialStats.available == 3)
         #expect(initialStats.leased == 0)
@@ -24,7 +27,7 @@ struct ResourcePoolBasicTests {
             #expect(duringStats.available == 2)
             #expect(duringStats.leased == 1)
             #expect(duringStats.utilization > 0.0)
-            
+
             return resource.id.uuidString
         }
         #expect(!result.isEmpty)
@@ -44,6 +47,9 @@ struct ResourcePoolBasicTests {
             resourceConfig: .init(),
             warmup: true
         )
+
+        // Wait for background warmup to complete
+        try await warmupPool.waitForWarmupCompletion()
 
         let warmupStats = await warmupPool.statistics
         #expect(warmupStats.available == 5)
@@ -265,16 +271,19 @@ struct ResourcePoolBasicTests {
             resourceConfig: .init(),
             warmup: true
         )
-        
+
+        // Wait for background warmup to complete
+        try await pool.waitForWarmupCompletion()
+
         actor BackpressureTracker {
             var sawBackpressure = false
-            
+
             func recordBackpressure() {
                 sawBackpressure = true
             }
         }
         let tracker = BackpressureTracker()
-        
+
         try await withThrowingTaskGroup(of: Void.self) { group in
             // Hold all resources
             for _ in 0..<2 {
@@ -284,26 +293,26 @@ struct ResourcePoolBasicTests {
                     }
                 }
             }
-            
+
             try await Task.sleep(for: .milliseconds(50))
-            
+
             // Try to acquire when exhausted
             group.addTask {
                 try await pool.withResource(timeout: .seconds(1)) { _ in
                     // Should eventually succeed
                 }
             }
-            
+
             // Check for backpressure
             try await Task.sleep(for: .milliseconds(50))
             let stats = await pool.statistics
             if stats.hasBackpressure {
                 await tracker.recordBackpressure()
             }
-            
+
             try await group.waitForAll()
         }
-        
+
         let sawBackpressure = await tracker.sawBackpressure
         #expect(sawBackpressure)
     }

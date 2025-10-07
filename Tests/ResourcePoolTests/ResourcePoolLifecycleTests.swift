@@ -45,25 +45,37 @@ struct ResourcePoolLifecycleTests {
             resourceConfig: .init(),
             warmup: true
         )
-        
+
+        // Wait for background warmup to complete
+        try await pool.waitForWarmupCompletion()
+
         let operation = Task {
             try await pool.withResource { _ in
                 try await Task.sleep(for: .milliseconds(200))
             }
         }
-        
+
         try await Task.sleep(for: .milliseconds(50))
-        
+
         let drainTask = Task {
             try await pool.drain(timeout: .seconds(1))
         }
-        
+
         _ = try await operation.value
         _ = try await drainTask.value
-        
+
+        // After drain, resources remain in pool but no new acquisitions allowed
         let stats = await pool.statistics
-        #expect(stats.available == 0)
+        #expect(stats.available == 3)
         #expect(stats.leased == 0)
+
+        // Verify new acquisitions are rejected
+        do {
+            try await pool.withResource { _ in }
+            Issue.record("Should reject acquisition after drain")
+        } catch PoolError.closed {
+            // Expected
+        }
     }
 
     @Test("Drain times out if resources not returned")
@@ -344,11 +356,18 @@ struct ResourcePoolLifecycleTests {
             
             // Drain
             try await pool.drain(timeout: .seconds(1))
-            
-            // Verify closed
+
+            // After drain, resources remain but new acquisitions are rejected
             let stats = await pool.statistics
             #expect(stats.leased == 0)
-            #expect(stats.available == 0)
+            #expect(stats.available == 3)
+
+            // Now close to clear resources
+            await pool.close()
+
+            let closedStats = await pool.statistics
+            #expect(closedStats.available == 0)
+            #expect(closedStats.leased == 0)
         }
     }
 
@@ -450,13 +469,25 @@ struct ResourcePoolLifecycleTests {
             resourceConfig: .init(),
             warmup: true
         )
-        
+
+        // Wait for background warmup to complete
+        try await pool.waitForWarmupCompletion()
+
         // Don't use any resources
         try await pool.drain(timeout: .milliseconds(100))
-        
+
+        // After drain, resources remain in pool but no new acquisitions allowed
         let stats = await pool.statistics
-        #expect(stats.available == 0)
+        #expect(stats.available == 5)
         #expect(stats.leased == 0)
+
+        // Verify new acquisitions are rejected
+        do {
+            try await pool.withResource { _ in }
+            Issue.record("Should reject acquisition after drain")
+        } catch PoolError.closed {
+            // Expected
+        }
     }
 
     @Test("Close cleans up background tasks")

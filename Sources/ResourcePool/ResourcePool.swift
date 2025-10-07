@@ -16,16 +16,29 @@ public enum PoolError: Error, Sendable, Equatable {
 ///
 /// Resources must be reference types (classes or actors) because the pool
 /// tracks them using ObjectIdentifier.
+///
+/// # Thread Safety Requirements
+/// All methods must be safe to call concurrently and from any isolation context.
+///
+/// # Cancellation Safety
+/// **IMPORTANT**: The `reset()` method MUST be cancellation-safe, meaning it should
+/// leave the resource in a valid, reusable state even if cancelled mid-operation.
+/// If your reset logic cannot be made cancellation-safe, consider making it non-async
+/// or using a synchronization mechanism to ensure atomicity.
 public protocol PoolableResource: Sendable, AnyObject {
     associatedtype Config: Sendable
-    
+
     /// Create a new resource instance
     static func create(config: Config) async throws -> Self
-    
+
     /// Check if the resource is still valid and can be reused
+    /// This is called before returning a resource from the pool.
     func validate() async -> Bool
-    
+
     /// Reset the resource to a clean state for reuse
+    ///
+    /// **Cancellation Safety**: This method MUST leave the resource in a valid state
+    /// even if cancelled. The pool will return the resource even on cancellation.
     func reset() async throws
 }
 
@@ -207,6 +220,7 @@ public actor ResourcePool<Resource: PoolableResource> {
         maxUsesBeforeCycling: Int? = nil
     ) async throws {
         precondition(capacity > 0, "Capacity must be positive")
+        precondition(capacity <= Int.max / 2, "Capacity must be reasonable (max \(Int.max / 2)) to prevent overflow")
 
         self.capacity = capacity
         self.factory = ResourceFactory(config: resourceConfig)
@@ -223,16 +237,18 @@ public actor ResourcePool<Resource: PoolableResource> {
                 // Create first resource synchronously - critical for cold start performance
                 let firstResource = try await factory.create()
                 totalCreated += 1
+                let id = ObjectIdentifier(firstResource)
+                resourceMetadata[id] = ResourceMetadata()
                 available.append(firstResource)
 
                 // Continue warmup for remaining resources in background
                 if capacity > 1 {
-                    startBackgroundWarmup(skipCount: 1)
+                    startBackgroundWarmup()
                 }
             } catch {
                 _metrics.recordCreationFailure()
                 // If first resource fails, fall back to full background warmup
-                startBackgroundWarmup(skipCount: 0)
+                startBackgroundWarmup()
             }
         }
 
@@ -269,6 +285,8 @@ public actor ResourcePool<Resource: PoolableResource> {
         timeout: Duration = .seconds(30),
         _ operation: (Resource) async throws -> T
     ) async throws -> T {
+        precondition(timeout > .zero, "Timeout must be positive")
+
         let acquisitionStart = ContinuousClock.now
         
         // Acquire resource (FIFO ordering)
@@ -300,7 +318,8 @@ public actor ResourcePool<Resource: PoolableResource> {
                 available: available.count,
                 leased: leased.count,
                 capacity: capacity,
-                waitQueueDepth: waitQueue.count
+                waitQueueDepth: waitQueue.count,
+                totalCreated: totalCreated
             )
         }
     }
@@ -327,6 +346,8 @@ public actor ResourcePool<Resource: PoolableResource> {
     /// accept resource returns from in-flight operations. The pool can then be safely
     /// deallocated via ARC, or you can call `close()` to explicitly clear all state.
     ///
+    /// Uses exponential backoff for efficient polling (starts at 10ms, doubles to max 100ms).
+    ///
     /// Use cases:
     /// - Pool replacement: `drain()` then let ARC deallocate
     /// - Graceful shutdown: `drain()` then `close()` to clear state
@@ -339,10 +360,15 @@ public actor ResourcePool<Resource: PoolableResource> {
         // Resume all waiters with closed error
         resumeAllWaitersWithError(PoolError.closed)
 
-        // Wait for leased resources to return
+        // Wait for leased resources to return with exponential backoff
         let deadline = ContinuousClock.now + timeout
+        var backoff = Duration.milliseconds(10)
+        let maxBackoff = Duration.milliseconds(100)
+
         while !leased.isEmpty && ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(50))
+            try await Task.sleep(for: backoff)
+            // Exponential backoff: double the wait time up to max
+            backoff = min(backoff * 2, maxBackoff)
         }
 
         if !leased.isEmpty {
@@ -398,15 +424,18 @@ public actor ResourcePool<Resource: PoolableResource> {
 
         // LAZY CREATION: Create if under capacity
         if totalCreated < capacity {
+            // Reserve capacity atomically
+            totalCreated += 1
             do {
                 let resource = try await factory.create()
-                totalCreated += 1
                 let id = ObjectIdentifier(resource)
                 leased.insert(id)
                 resourceMetadata[id] = ResourceMetadata()
                 recordResourceAcquisition(id: id)
                 return resource
             } catch {
+                // Creation failed - release reserved capacity
+                totalCreated -= 1
                 _metrics.recordCreationFailure()
                 throw PoolError.creationFailed("Failed to create resource: \(error)")
             }
@@ -504,32 +533,44 @@ public actor ResourcePool<Resource: PoolableResource> {
         // Reset resource - handle cancellation during cleanup
         do {
             try await resource.reset()
-            
+
             // Check again if pool was closed during reset
             guard !isClosed else {
                 totalCreated -= 1
                 return
             }
-            
+
             _metrics.recordSuccessfulReturn()
-            
+
             // KEY: Hand off resource directly to next waiter or return to pool
             handOffOrReturnResource(resource)
-            
+
         } catch is CancellationError {
-            // Cancellation during cleanup - check if pool still open
+            // Cancellation during reset - re-validate for safety
+            // Even though the protocol requires cancellation-safe reset(),
+            // we validate defensively to protect against buggy implementations
+            let isValid = await resource.validate()
+            guard isValid else {
+                // Resource left in bad state - discard it
+                totalCreated -= 1
+                resourceMetadata.removeValue(forKey: id)
+                _metrics.recordResetFailure()
+                await tryServeNextWaiter()
+                return
+            }
+
             guard !isClosed else {
                 totalCreated -= 1
                 return
             }
-            
-            // Pool still open - return resource despite cancellation
+
             _metrics.recordSuccessfulReturn()
             handOffOrReturnResource(resource)
-            
+
         } catch {
             // Actual reset failure - discard resource
             totalCreated -= 1
+            resourceMetadata.removeValue(forKey: id)
             _metrics.recordResetFailure()
             // Try to serve next waiter with a new resource
             await tryServeNextWaiter()
@@ -545,20 +586,31 @@ public actor ResourcePool<Resource: PoolableResource> {
         // Under high contention with many timeouts, limit removals per call
         let maxRemovalsPerCall = 10
         var removedCount = 0
+        var expiredWaiters: [Waiter<Resource>] = []
+
         waitQueue.removeAll { waiter in
             guard removedCount < maxRemovalsPerCall else { return false }
             if waiter.isExpired {
+                expiredWaiters.append(waiter)
                 removedCount += 1
                 return true
             }
             return false
         }
 
+        // Resume expired waiters with timeout error
+        for waiter in expiredWaiters {
+            _metrics.recordTimeout()
+            waiter.continuation.resume(throwing: PoolError.timeout)
+        }
+
         // If there's a waiter, hand off directly (FIFO for fairness)
         if let waiter = waitQueue.first {
             waitQueue.removeFirst()
-            leased.insert(ObjectIdentifier(resource))
+            let id = ObjectIdentifier(resource)
+            leased.insert(id)
             _metrics.recordDirectHandoff()
+            recordResourceAcquisition(id: id)
 
             // Resume the continuation with the resource
             // This wakes EXACTLY ONE task - no thundering herd!
@@ -574,20 +626,31 @@ public actor ResourcePool<Resource: PoolableResource> {
         guard !waitQueue.isEmpty, totalCreated < capacity else {
             return
         }
-        
+
+        // Reserve capacity before async creation
+        totalCreated += 1
+
         do {
             let resource = try await factory.create()
-            totalCreated += 1
-            
+            let id = ObjectIdentifier(resource)
+
+            // Initialize metadata for new resource
+            resourceMetadata[id] = ResourceMetadata()
+
             // Hand off to next waiter
             if let waiter = waitQueue.first {
                 waitQueue.removeFirst()
-                leased.insert(ObjectIdentifier(resource))
+                leased.insert(id)
+                recordResourceAcquisition(id: id)
+                _metrics.recordDirectHandoff()
                 waiter.continuation.resume(returning: resource)
             } else {
+                // No waiter anymore, add to available pool
                 available.append(resource)
             }
         } catch {
+            // Creation failed, release reserved capacity
+            totalCreated -= 1
             _metrics.recordCreationFailure()
         }
     }
@@ -612,49 +675,60 @@ public actor ResourcePool<Resource: PoolableResource> {
 
     /// Start background warmup to pre-create resources without blocking initialization
     ///
-    /// This creates resources in the background. With skipCount > 0, it skips creating
-    /// the first N resources (useful when some resources were created synchronously).
-    ///
-    /// - Parameter skipCount: Number of resources to skip (already created)
-    private func startBackgroundWarmup(skipCount: Int = 0) {
-        let targetCapacity = capacity
-
+    /// This creates resources in the background until capacity is reached.
+    /// The function automatically accounts for already-created resources by
+    /// checking totalCreated.
+    private func startBackgroundWarmup() {
         Task { [weak self] in
             guard let self = self else { return }
 
             // Pre-create remaining resources up to capacity
-            for _ in skipCount..<targetCapacity {
-                // Check if pool was closed or we've reached capacity
-                let isClosed = await self.isClosed
-                let totalCreated = await self.totalCreated
-
-                guard !isClosed, totalCreated < targetCapacity else {
-                    break
-                }
-
+            // shouldCreateWarmupResource() checks totalCreated, so this naturally
+            // accounts for any resources already created
+            while await self.shouldCreateWarmupResource() {
                 do {
                     let resource = try await self.factory.create()
 
-                    // Add to pool if still needed
-                    await self.addWarmupResource(resource)
+                    // Add to pool - this increments totalCreated
+                    await self.addWarmupResource(resource, incrementCount: true)
                 } catch {
                     await self.recordCreationFailure()
-                    // Continue warmup despite failures - some resources may succeed
                 }
             }
         }
     }
 
+    /// Check if we should create another warmup resource
+    private func shouldCreateWarmupResource() -> Bool {
+        return !isClosed && totalCreated < capacity
+    }
+
     /// Add a warmed-up resource to the pool
-    private func addWarmupResource(_ resource: Resource) {
-        guard !isClosed, totalCreated < capacity else {
-            // Pool closed or capacity reached during warmup - discard
+    private func addWarmupResource(_ resource: Resource, incrementCount: Bool) {
+        guard !isClosed else {
+            // Pool closed - discard resource
             return
         }
 
-        totalCreated += 1
+        // Increment count BEFORE checking capacity to prevent race conditions
+        if incrementCount {
+            totalCreated += 1
 
-        // Hand off to waiter if any, otherwise add to available
+            // Check if we exceeded capacity (race condition with concurrent warmup)
+            guard totalCreated <= capacity else {
+                // Over capacity - rollback and discard
+                totalCreated -= 1
+                return
+            }
+        }
+
+        // Initialize metadata for warmup resources
+        let id = ObjectIdentifier(resource)
+        if resourceMetadata[id] == nil {
+            resourceMetadata[id] = ResourceMetadata()
+        }
+
+        // Add the resource to the pool
         handOffOrReturnResource(resource)
     }
 
@@ -708,6 +782,18 @@ public actor ResourcePool<Resource: PoolableResource> {
     internal func testVerifyAccounting() {
         verifyAccounting()
     }
+
+    /// Test helper: Wait for background warmup to complete
+    /// This is useful in tests that check statistics immediately after pool creation
+    internal func waitForWarmupCompletion(timeout: Duration = .seconds(5)) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while totalCreated < capacity && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        if totalCreated < capacity {
+            throw PoolError.timeout
+        }
+    }
     #else
     private func verifyAccounting() {}
     #endif
@@ -723,16 +809,19 @@ public actor ResourcePool<Resource: PoolableResource> {
 public struct Statistics: Sendable, Equatable {
     /// Number of resources currently available for acquisition
     public let available: Int
-    
+
     /// Number of resources currently leased out
     public let leased: Int
-    
+
     /// Maximum capacity of the pool
     public let capacity: Int
-    
+
     /// Number of tasks currently waiting for a resource
     public let waitQueueDepth: Int
-    
+
+    /// Total resources created (debug)
+    public let totalCreated: Int
+
     /// Alias for leased count
     public var inUse: Int { leased }
     
@@ -757,7 +846,8 @@ public struct Metrics: Sendable {
         available: 0,
         leased: 0,
         capacity: 0,
-        waitQueueDepth: 0
+        waitQueueDepth: 0,
+        totalCreated: 0
     )
     
     /// Total number of successful resource acquisitions
