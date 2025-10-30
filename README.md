@@ -7,6 +7,23 @@
 
 Thread-safe pooling with FIFO fairness, automatic resource management, and zero thundering herd.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Why swift-resource-pool?](#why-swift-resource-pool)
+- [Quick Start](#quick-start)
+- [Core Concepts](#core-concepts)
+- [Real-World Examples](#real-world-examples)
+- [Performance Characteristics](#performance-characteristics)
+- [API Reference](#api-reference)
+- [Advanced Usage](#advanced-usage)
+- [Error Handling](#error-handling)
+- [Requirements](#requirements)
+- [Related Packages](#related-packages)
+- [Dependencies](#dependencies)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Overview
 
 **swift-resource-pool** provides a generic, high-performance resource pooling solution built with Swift's actor model. It eliminates the thundering herd problem through direct resource handoff, ensures fairness with FIFO ordering, and offers comprehensive metrics for production monitoring.
@@ -637,6 +654,13 @@ public enum PoolError: Error, Sendable, Equatable {
   - iOS 17+
   - tvOS 17+
   - watchOS 10+
+
+## Related Packages
+
+This package is part of the coenttb Swift ecosystem for server-side development:
+
+- **[swift-html-to-pdf](https://github.com/coenttb/swift-html-to-pdf)** - High-performance HTML to PDF conversion using WKWebView with resource pooling
+- **[swift-records](https://github.com/coenttb/swift-records)** - High-level database abstraction with connection pooling for PostgreSQL
 
 ## Dependencies
 
