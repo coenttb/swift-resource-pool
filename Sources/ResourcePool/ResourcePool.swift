@@ -761,7 +761,7 @@ public actor ResourcePool<Resource: PoolableResource> {
     }
     
     // MARK: - Debug Support
-    
+
     #if DEBUG
     /// Verify accounting invariant: available + leased = totalCreated
     ///
@@ -777,11 +777,14 @@ public actor ResourcePool<Resource: PoolableResource> {
                  totalCreated: \(totalCreated)
                """)
     }
-    
+
     /// Test helper: Verify accounting at a quiescent point
     internal func testVerifyAccounting() {
         verifyAccounting()
     }
+    #else
+    private func verifyAccounting() {}
+    #endif
 
     /// Test helper: Wait for background warmup to complete
     /// This is useful in tests that check statistics immediately after pool creation
@@ -794,9 +797,6 @@ public actor ResourcePool<Resource: PoolableResource> {
             throw PoolError.timeout
         }
     }
-    #else
-    private func verifyAccounting() {}
-    #endif
     
     deinit {
         cleanupTask?.cancel()
