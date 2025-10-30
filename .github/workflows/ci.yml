@@ -12,57 +12,72 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Swift 5.9 testing
-  swift-5_9:
-    name: Swift 5.9 / macOS
+  macos-swift59:
+    name: macOS (Swift 5.9)
     runs-on: macos-14
     strategy:
       matrix:
+        xcode: ['15.2']
         config: ['debug', 'release']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Select Xcode (Swift 5.9)
-        run: sudo xcode-select -s /Applications/Xcode_15.2.app
+      - name: Select Xcode ${{ matrix.xcode }}
+        run: sudo xcode-select -s /Applications/Xcode_${{ matrix.xcode }}.app
 
       - name: Print Swift version
         run: swift --version
 
-      - name: Build with Package.swift
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-xcode${{ matrix.xcode }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-xcode${{ matrix.xcode }}-
+
+      - name: Build
         run: swift build -c ${{ matrix.config }}
 
       - name: Run tests
         run: swift test -c ${{ matrix.config }}
 
-  # Swift 6.0 testing
-  swift-6_0:
-    name: Swift 6.0 / macOS
+  macos-swift62:
+    name: macOS (Swift 6.2)
     runs-on: macos-15
     strategy:
       matrix:
+        xcode: ['16.2']
         config: ['debug', 'release']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Select Xcode (Swift 6.0)
-        run: sudo xcode-select -s /Applications/Xcode_16.0.app
+      - name: Select Xcode ${{ matrix.xcode }}
+        run: sudo xcode-select -s /Applications/Xcode_${{ matrix.xcode }}.app
 
       - name: Print Swift version
         run: swift --version
 
-      - name: Build with Package@swift-6.0.swift
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-xcode${{ matrix.xcode }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-xcode${{ matrix.xcode }}-
+
+      - name: Build
         run: swift build -c ${{ matrix.config }}
 
       - name: Run tests
         run: swift test -c ${{ matrix.config }}
 
-  # Linux testing (Swift 6.0)
-  linux:
-    name: Swift 6.0 / Ubuntu
+  linux-swift510:
+    name: Ubuntu (Swift 5.10)
     runs-on: ubuntu-latest
-    container: swift:6.0
+    container: swift:5.10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build
         run: swift build
@@ -70,10 +85,38 @@ jobs:
       - name: Run tests
         run: swift test
 
-  # All platforms must pass
+  linux-swift62:
+    name: Ubuntu (Swift 6.2)
+    runs-on: ubuntu-latest
+    container: swift:6.2
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build
+        run: swift build
+
+      - name: Run tests
+        run: swift test
+
+  windows:
+    name: Windows (Swift 6.2)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: SwiftyLab/setup-swift@latest
+        with:
+          swift-version: "6.2"
+
+      - name: Build
+        run: swift build
+
+      - name: Run tests
+        run: swift test
+
   ci-success:
     name: CI Success
-    needs: [swift-5_9, swift-6_0, linux]
+    needs: [macos-swift59, macos-swift62, linux-swift510, linux-swift62, windows]
     runs-on: ubuntu-latest
     steps:
       - run: echo "✅ All CI checks passed!"

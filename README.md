@@ -1,21 +1,11 @@
 # swift-resource-pool
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Swift-5.9+-orange.svg" alt="Swift 5.9+">
-  <img src="https://img.shields.io/badge/Platforms-macOS%20|%20iOS%20|%20tvOS%20|%20watchOS%20|%20Linux-lightgray.svg" alt="Platforms">
-  <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License">
-  <a href="https://github.com/coenttb/swift-resource-pool/releases"><img src="https://img.shields.io/github/v/release/coenttb/swift-resource-pool?label=Release&color=green" alt="Latest Release"></a>
-</p>
+[![CI](https://github.com/coenttb/swift-resource-pool/workflows/CI/badge.svg)](https://github.com/coenttb/swift-resource-pool/actions/workflows/ci.yml)
+![Development Status](https://img.shields.io/badge/status-active--development-blue.svg)
 
-<p align="center">
-  <a href="https://github.com/coenttb/swift-resource-pool/actions/workflows/ci.yml"><img src="https://github.com/coenttb/swift-resource-pool/actions/workflows/ci.yml/badge.svg" alt="CI Status"></a>
-  <a href="https://github.com/coenttb/swift-resource-pool/actions/workflows/performance.yml"><img src="https://github.com/coenttb/swift-resource-pool/actions/workflows/performance.yml/badge.svg" alt="Performance"></a>
-</p>
+**A production-ready, actor-based resource pool for Swift**
 
-<p align="center">
-  <strong>A production-ready, actor-based resource pool for Swift</strong><br>
-  Thread-safe pooling with FIFO fairness, automatic resource management, and zero thundering herd
-</p>
+Thread-safe pooling with FIFO fairness, automatic resource management, and zero thundering herd.
 
 ## Overview
 

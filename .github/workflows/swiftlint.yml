@@ -1,0 +1,21 @@
+name: swiftlint
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  swiftlint:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install swiftlint
+        run: |
+          brew install swiftlint
+
+      - name: Run swiftlint
+        run: |
+          swiftlint lint --reporter github-actions-logging
+          echo "ℹ️ SwiftLint warnings are informational only and do not block the PR"
+          echo "ℹ️ To fix issues locally, run: swiftlint lint --fix"

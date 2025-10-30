@@ -1,0 +1,32 @@
+name: swift-format
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  swift-format:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Install swift-format
+        run: |
+          brew install swift-format
+
+      - name: Run swift-format
+        run: |
+          swift-format format --recursive --in-place Sources Tests
+
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Run swift-format"
