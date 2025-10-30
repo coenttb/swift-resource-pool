@@ -281,7 +281,7 @@ public actor ResourcePool<Resource: PoolableResource> {
     ///     try await resource.performWork()
     /// }
     /// ```
-    public func withResource<T>(
+    public func withResource<T: Sendable>(
         timeout: Duration = .seconds(30),
         _ operation: (Resource) async throws -> T
     ) async throws -> T {
