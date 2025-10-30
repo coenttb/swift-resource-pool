@@ -14,6 +14,8 @@ concurrency:
 jobs:
   # Note: Swift Testing framework requires Swift 6.0+
   # Tests use @Test and #expect which are not available in Swift 5.x
+  # macOS jobs run release builds only due to Swift Testing framework crashes in debug mode on CI
+  # Debug testing happens locally during development
 
   macos-swift60:
     name: macOS (Swift 6.0)
@@ -21,7 +23,7 @@ jobs:
     strategy:
       matrix:
         xcode: ['16.0']
-        config: ['debug', 'release']
+        config: ['release']
     steps:
       - uses: actions/checkout@v5
 
@@ -51,7 +53,7 @@ jobs:
     strategy:
       matrix:
         xcode: ['16.2']
-        config: ['debug', 'release']
+        config: ['release']
     steps:
       - uses: actions/checkout@v5
 
