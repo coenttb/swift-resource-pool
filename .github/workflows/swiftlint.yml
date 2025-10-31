@@ -6,13 +6,9 @@ on:
 
 jobs:
   swiftlint:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
-      - name: Install swiftlint
-        run: |
-          brew install swiftlint
 
       - name: Run swiftlint
         run: |
