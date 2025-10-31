@@ -657,10 +657,9 @@ public enum PoolError: Error, Sendable, Equatable {
 
 ## Related Packages
 
-This package is part of the coenttb Swift ecosystem for server-side development:
+### Used By
 
-- **[swift-html-to-pdf](https://github.com/coenttb/swift-html-to-pdf)** - High-performance HTML to PDF conversion using WKWebView with resource pooling
-- **[swift-records](https://github.com/coenttb/swift-records)** - High-level database abstraction with connection pooling for PostgreSQL
+- [swift-html-to-pdf](https://github.com/coenttb/swift-html-to-pdf): The Swift package for printing HTML to PDF.
 
 ## Dependencies
 
