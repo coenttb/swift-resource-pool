@@ -3,9 +3,7 @@
 [![CI](https://github.com/coenttb/swift-resource-pool/workflows/CI/badge.svg)](https://github.com/coenttb/swift-resource-pool/actions/workflows/ci.yml)
 ![Development Status](https://img.shields.io/badge/status-active--development-blue.svg)
 
-**A production-ready, actor-based resource pool for Swift**
-
-Thread-safe pooling with FIFO fairness, automatic resource management, and zero thundering herd.
+Actor-based resource pool for Swift with thread-safe pooling, FIFO fairness, and automatic resource management.
 
 ## Table of Contents
 
@@ -66,32 +64,25 @@ let results = try await pool.withResource { connection in
 }
 ```
 
-## Why swift-resource-pool?
+## Key Features
 
-### 🎯 Zero Thundering Herd
-- **Direct handoff**: Resources go directly to exactly ONE waiting task
-- **O(1) wakeup**: No broadcast storms when resources become available  
-- **Proven efficiency**: 90-95% handoff rate under sustained load
-- **Scales to 200+ waiters**: No performance degradation
+### Efficient Resource Handoff
+- Direct handoff to exactly one waiting task without broadcast storms
+- O(1) wakeup efficiency with 90-95% direct handoff rate under sustained load
+- Linear scalability up to 200+ concurrent waiters without performance degradation
 
-### ⚖️ Fairness Guarantees
-- **FIFO queue**: Waiters served in arrival order
-- **No starvation**: Every task gets its turn
-- **Predictable behavior**: Consistent wait times across requests
-- **Cache locality**: LIFO resource selection for hot caches
+### Fairness and Reliability
+- FIFO queue ensures waiters are served in arrival order
+- Guaranteed cleanup even during task cancellation
+- Thread-safe actor-isolated implementation without locks
+- Comprehensive production metrics for utilization tracking
 
-### 🛡️ Production Ready
-- **Cancellation safe**: Guaranteed cleanup even on task cancellation
-- **Actor isolated**: Thread-safe without locks
-- **Comprehensive metrics**: Track utilization, timeouts, handoffs
-- **Memory efficient**: Bounded cache with automatic eviction
-- **Battle tested**: 45 test scenarios, 33+ consecutive successful runs
-
-### ⚡ High Performance
-- **Lazy creation**: Resources created on-demand up to capacity
-- **Optional warmup**: Pre-create resources for instant availability
-- **Validation & reset**: Automatic resource cleanup between uses
-- **Efficient timeouts**: Per-waiter deadlines without polling
+### Performance Characteristics
+- Lazy resource creation on-demand up to capacity limits
+- Optional warmup for pre-created resources
+- Automatic validation and reset between resource uses
+- Per-waiter efficient timeout deadlines
+- 45 test scenarios with proven stability
 
 ## Quick Start
 
@@ -671,11 +662,11 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 
 ## Support
 
-- 🐛 **[Issue Tracker](https://github.com/coenttb/swift-resource-pool/issues)** - Report bugs or request features
-- 💬 **[Discussions](https://github.com/coenttb/swift-resource-pool/discussions)** - Ask questions and share ideas
-- 📧 **[Newsletter](http://coenttb.com/en/newsletter/subscribe)** - Stay updated
-- 🐦 **[X (Twitter)](http://x.com/coenttb)** - Follow for updates
-- 💼 **[LinkedIn](https://www.linkedin.com/in/tenthijeboonkkamp)** - Connect professionally
+- **[Issue Tracker](https://github.com/coenttb/swift-resource-pool/issues)** - Report bugs or request features
+- **[Discussions](https://github.com/coenttb/swift-resource-pool/discussions)** - Ask questions and share ideas
+- **[Newsletter](http://coenttb.com/en/newsletter/subscribe)** - Stay updated
+- **[X (Twitter)](http://x.com/coenttb)** - Follow for updates
+- **[LinkedIn](https://www.linkedin.com/in/tenthijeboonkkamp)** - Connect professionally
 
 ## License
 
@@ -684,5 +675,5 @@ This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) fo
 ---
 
 <p align="center">
-  Made with ❤️ by <a href="https://coenttb.com">coenttb</a><br>
+  Made by <a href="https://coenttb.com">coenttb</a>
 </p>
