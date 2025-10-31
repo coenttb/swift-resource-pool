@@ -6,7 +6,7 @@ on:
 
 jobs:
   swift-format:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
@@ -20,7 +20,12 @@ jobs:
 
       - name: Install swift-format
         run: |
-          brew install swift-format
+          git clone --depth 1 --branch main https://github.com/apple/swift-format.git
+          cd swift-format
+          swift build -c release
+          sudo cp .build/release/swift-format /usr/local/bin/
+          cd ..
+          rm -rf swift-format
 
       - name: Run swift-format
         run: |
