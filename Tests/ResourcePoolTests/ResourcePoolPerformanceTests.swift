@@ -84,7 +84,7 @@ struct ResourcePoolPerformanceTests {
       (2, 10, 20),
       (5, 30, 10),
       (10, 50, 10),
-      (20, 100, 5)
+      (20, 100, 5),
     ]
 
     for (capacity, tasks, opsPerTask) in configs {
@@ -215,7 +215,8 @@ struct ResourcePoolPerformanceTests {
     print("Avg:  \(await tracker.avg()?.formatted() ?? "N/A")")
 
     if let p99 = await tracker.percentile(0.99),
-      let avg = await tracker.avg() {
+      let avg = await tracker.avg()
+    {
       let p99Ns = Double(p99.components.attoseconds) / 1_000_000_000
       let avgNs = Double(avg.components.attoseconds) / 1_000_000_000
 

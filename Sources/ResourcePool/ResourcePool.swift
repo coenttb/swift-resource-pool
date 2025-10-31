@@ -511,7 +511,8 @@ public actor ResourcePool<Resource: PoolableResource> {
     // Check if resource should be cycled
     if let maxUses = maxUsesBeforeCycling,
       let metadata = resourceMetadata[id],
-      metadata.usageCount >= maxUses {
+      metadata.usageCount >= maxUses
+    {
       // Resource exceeded max uses - discard and replace
       totalCreated -= 1
       resourceMetadata.removeValue(forKey: id)

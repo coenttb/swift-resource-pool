@@ -310,7 +310,7 @@ struct ReadmeVerificationTests {
       .closed,
       .creationFailed("test"),
       .resetFailed("test"),
-      .drainTimeout
+      .drainTimeout,
     ]
 
     #expect(errors.count == 5)
