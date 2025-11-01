@@ -86,7 +86,7 @@ jobs:
           echo "notes_file=release-notes.md" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           body_path: ${{ steps.notes.notes_file }}
           draft: false
