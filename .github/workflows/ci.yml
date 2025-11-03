@@ -133,6 +133,16 @@ jobs:
       - name: Run tests
         run: swift test
 
+  readme-validation:
+    name: README Code Examples
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.0.app
+      - name: Run README verification tests
+        run: swift test --filter ReadmeVerificationTests
+
   ci-success:
     name: CI Success
     needs: [macos-swift60, macos-swift62, linux-swift60, linux-swift62, windows]

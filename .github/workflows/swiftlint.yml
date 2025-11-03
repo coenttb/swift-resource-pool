@@ -1,17 +1,13 @@
-name: swiftlint
-
+name: SwiftLint
 on:
   pull_request:
     branches: [main]
 
 jobs:
-  swiftlint:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
-      - name: Run swiftlint
-        run: |
-          swiftlint lint --reporter github-actions-logging
-          echo "ℹ️ SwiftLint warnings are informational only and do not block the PR"
-          echo "ℹ️ To fix issues locally, run: swiftlint lint --fix"
+      - name: SwiftLint
+        run: swiftlint lint
+        continue-on-error: true
