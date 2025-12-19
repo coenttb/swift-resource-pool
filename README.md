@@ -641,10 +641,10 @@ public enum PoolError: Error, Sendable, Equatable {
 
 - Swift 5.9+ (Swift 6.0 language mode for strict concurrency)
 - Platforms:
-  - macOS 14+
-  - iOS 17+
-  - tvOS 17+
-  - watchOS 10+
+  - macOS 13+
+  - iOS 16+
+  - tvOS 16+
+  - watchOS 9+
 
 ## Related Packages
 
