@@ -6,7 +6,7 @@ let package = Package(
     name: "swift-resource-pool",
     platforms: [
         .macOS(.v14),
-        .iOS(.v17),
+        .iOS(.v16),
         .tvOS(.v17),
         .watchOS(.v10)
     ],
