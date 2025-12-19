@@ -88,11 +88,13 @@ jobs:
 
       - name: Build and Test on iOS
         run: |
+          # Find first available iPhone simulator
+          DEVICE_ID=$(xcrun simctl list devices available | grep "iPhone" | head -1 | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
+          echo "Using simulator: $DEVICE_ID"
           xcodebuild test \
             -scheme swift-resource-pool \
-            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16 Pro' \
-            -skipPackagePluginValidation \
-            -resultBundlePath TestResults
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -skipPackagePluginValidation
 
   # Compatibility check: Minimum supported Swift version (6.0)
   # Note: Swift Testing framework requires Swift 6.0+
