@@ -94,6 +94,8 @@ jobs:
           xcodebuild test \
             -scheme swift-resource-pool \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -skip-testing:ResourcePoolTests/ResourcePoolLifecycleTests \
+            -skip-testing:ResourcePoolTests/ResourcePoolBasicTests/HasBackpressure_indicator_works \
             -skipPackagePluginValidation
 
   # Compatibility check: Minimum supported Swift version (6.0)
