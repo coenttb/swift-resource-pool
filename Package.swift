@@ -14,7 +14,7 @@ let package = Package(
         .library(
             name: "ResourcePool",
             targets: ["ResourcePool"]
-        ),
+        )
     ],
     targets: [
         .target(
@@ -23,7 +23,7 @@ let package = Package(
         .testTarget(
             name: "ResourcePoolTests",
             dependencies: ["ResourcePool"]
-        ),
+        )
     ],
     swiftLanguageModes: [.v6]
 )
@@ -31,7 +31,7 @@ let package = Package(
 let swiftSettings: [SwiftSetting] = [
     .enableUpcomingFeature("MemberImportVisibility"),
     .enableUpcomingFeature("StrictUnsafe"),
-    .enableUpcomingFeature("NonisolatedNonsendingByDefault"),
+    .enableUpcomingFeature("NonisolatedNonsendingByDefault")
 //    .unsafeFlags(["-warnings-as-errors"]),
 ]
 

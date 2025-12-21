@@ -1,4 +1,4 @@
-import Foundation
+// Foundation-free resource pooling library
 
 // MARK: - Pool Errors
 
@@ -56,7 +56,7 @@ private struct ResourceFactory<Resource: PoolableResource>: Sendable {
 
 /// Represents a task waiting for a resource
 private struct Waiter<Resource: PoolableResource>: Sendable {
-  let id: UUID
+  let id: UInt64
   let continuation: CheckedContinuation<Resource, Error>
   let deadline: ContinuousClock.Instant
 
@@ -204,6 +204,9 @@ public actor ResourcePool<Resource: PoolableResource> {
 
   /// Maximum uses before cycling a resource (nil = no cycling)
   private let maxUsesBeforeCycling: Int?
+
+  /// Counter for generating unique waiter IDs
+  private var nextWaiterId: UInt64 = 0
 
   // MARK: - Initialization
 
@@ -445,7 +448,8 @@ public actor ResourcePool<Resource: PoolableResource> {
     }
 
     // WAIT PATH: Pool exhausted, add to FIFO queue with cancellation support
-    let waiterId = UUID()
+    nextWaiterId += 1
+    let waiterId = nextWaiterId
 
     return try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { continuation in
@@ -472,7 +476,7 @@ public actor ResourcePool<Resource: PoolableResource> {
   }
 
   /// Handle cancellation of a waiting task
-  private func handleCancellation(waiterId: UUID) {
+  private func handleCancellation(waiterId: UInt64) {
     guard let index = waitQueue.firstIndex(where: { $0.id == waiterId }) else {
       return  // Already resumed (got resource, timed out, or pool closed)
     }
@@ -482,7 +486,7 @@ public actor ResourcePool<Resource: PoolableResource> {
   }
 
   /// Handle timeout for a specific waiter
-  private func handleTimeout(waiterId: UUID) {
+  private func handleTimeout(waiterId: UInt64) {
     guard let index = waitQueue.firstIndex(where: { $0.id == waiterId }) else {
       return  // Already resumed (got resource or pool closed)
     }
@@ -517,7 +521,6 @@ public actor ResourcePool<Resource: PoolableResource> {
       totalCreated -= 1
       resourceMetadata.removeValue(forKey: id)
       _metrics.recordResourceCycled()
-      // Try to serve next waiter with a new resource
       await tryServeNextWaiter()
       return
     }
@@ -944,7 +947,7 @@ public struct Metrics: Sendable {
 // MARK: - Duration Extensions
 
 extension Duration {
-  fileprivate static func / (lhs: Duration, rhs: Int) -> Duration {
+  private static func / (lhs: Duration, rhs: Int) -> Duration {
     // Convert to nanoseconds with better precision
     // attoseconds = 10^-18 seconds, so attoseconds / 10^9 = nanoseconds
     let totalNanoseconds =

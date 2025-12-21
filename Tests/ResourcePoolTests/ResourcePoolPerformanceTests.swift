@@ -84,7 +84,7 @@ struct ResourcePoolPerformanceTests {
       (2, 10, 20),
       (5, 30, 10),
       (10, 50, 10),
-      (20, 100, 5),
+      (20, 100, 5)
     ]
 
     for (capacity, tasks, opsPerTask) in configs {

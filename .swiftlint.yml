@@ -3,6 +3,11 @@ disabled_rules:
   - identifier_name
   - nesting
   - redundant_discardable_let  # Preserve 'let _ =' in result builder contexts (required for Swift 6.0+)
+  - function_body_length
+  - file_length
+  - type_body_length
+  - large_tuple
+  - opening_brace  # swift-format controls brace placement
 
 opt_in_rules:
   - empty_count
@@ -15,7 +20,6 @@ opt_in_rules:
   - operator_usage_whitespace
   - private_outlet
   - redundant_nil_coalescing
-  - unused_capture_list
   - empty_string
   - explicit_enum_raw_value
   - literal_expression_end_indentation
@@ -27,7 +31,7 @@ opt_in_rules:
   - no_extension_access_modifier
   - colon
   - trailing_comma
-  
+
 included:
   - Package.swift
   - Sources

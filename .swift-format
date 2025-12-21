@@ -10,6 +10,7 @@
   "prioritizeKeepingFunctionOutputTogether": false,
   "indentConditionalCompilationBlocks": true,
   "lineBreakAroundMultilineExpressionChainComponents": false,
+  "multiElementCollectionTrailingCommas": false,
   "rules": {
     "AllPublicDeclarationsHaveDocumentation": false,
     "AlwaysUseLowerCamelCase": true,
